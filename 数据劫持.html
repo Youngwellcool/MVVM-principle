@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>数据劫持模拟</title>
+</head>
+<body>
+    <div id="app">
+        <p>a对象中d的值为：{{a.d}}</p>
+        <p>b的值：{{b}}</p>
+    </div>
+    <script src="mvvm.js"></script>
+    <script>
+        var yww = new Yww({
+            el:"#app",
+            data:{
+                a:{d:12},
+                b:'是b112343'
+            }
+        })
+    </script>
+</body>
+</html>
