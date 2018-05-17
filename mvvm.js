@@ -8,9 +8,11 @@ function Yww(options = {}){
         Object.defineProperty(this,key,{
             enumerable:true,
             get(){
+                // console.log('Yww代理中的get') 
                 return this._data[key];
             },
             set(newVal){
+                // console.log('Yww代理中的set') 
                 this._data[key] = newVal;
             }
         })
@@ -53,7 +55,9 @@ function Yww(options = {}){
 
 
 function Observe(data){
-    Object.keys(data).forEach(function(key){
+    let dep = new Dep();
+    // for(let key in data){   // 巨坑，这里循环data不能用for in 否则添加了劫持的data中的所有属性的值都等于最后一个属性的值 [ 比如 data:{a:{d:12},b:56} => data:{a:56,b:56} ],所以改用Object.keys(data)将data中所有的key存放在数组中再遍历数组
+    Object.keys(data).forEach(function(key){  // 将data中所有的key存放在数组中再遍历数组
         var value = data[key];
         // console.log(key)
        
@@ -61,14 +65,18 @@ function Observe(data){
             enumerable:true,  // 开启可枚举
             configurable:true,
             get(){
+                console.log('observe中的get')  
+                Dep.target && dep.addSub(Dep.target) // 在Watcher构造函数中设置了Dep.target等于Watcher构造函数实例化后的对象watcher(即Dep.target=watcher)，此步就是把watcher对象添加到subs数组中，即订阅watcher对象
                 return value;
             },
             set(newVal){
                 if(newVal == value){
                     return
                 }
+                console.log('observe中的set') 
                 value = newVal;
                 observe(newVal) // 设置新值时也调用observe，给新值加上get和set方法，实现深度响应
+                dep.notify()  // 让所有watcher的update方法执行
             }
         })
 
@@ -95,17 +103,17 @@ function Compile(el,vm){
     vm.$el = document.querySelector(el); // 将el挂载到实例的$el上
     var fragment = document.createDocumentFragment(); // 创建一个html碎片fragment， fragment存在内存中
     while(child = vm.$el.firstChild){  // 循环将el中的第一个子元素放入fragment中，直到将el中所有的元素全部放到fragment中，此时el中为空了
-        fragment.appendChild(child);
+        fragment.appendChild(child); // appendChild方法具有移动元素的特性
     }
     // console.log(fragment)  // <p>a对象中d的值为：{{a.d}}</p> <p>b的值：{{b}}</p>  el中的子元素全部到fragment中了
     // console.log(vm.$el)  // <div id="app"></div>  el中没有子元素了
     replace(fragment)
     function replace(fragment){
-        Array.from(fragment.childNodes).forEach(function(node){ // 获取到fragment中的子节点转为数组再循环
+        Array.from(fragment.childNodes).forEach(function(node){ // 获取到fragment中所有的子节点转为数组再循环
         // 循环参数node为当前循环的node节点
             var text = node.textContent; // 获取node节点的文本内容
-            var reg = /\{\{(.*)\}\}/;
-            if(node.nodeType === 3 && reg.test(text)){
+            var reg = /\{\{(.*)\}\}/;  // 定义一个匹配 {{}} 的正则
+            if(node.nodeType === 3 && reg.test(text)){  // 如果当前遍历的node是文本节点且能匹配正则，即找到了模板变量
                 // console.log(text)
                 // console.log(RegExp.$1) // a.d , b 取到{{}}中的值
                 var arr = RegExp.$1.split('.'); // ['a','d'] , ['b']
@@ -115,9 +123,13 @@ function Compile(el,vm){
                     val = val[k]; // 关键点：(1)循环['a','d']，第一层循环将vm.a赋值给val,第二层循环将vm.a.d赋值给val，这样就拿到了vm.a.d; (2)循环['b']，将vm.b赋值给val,这样就拿到了vm.b
                     // console.log(val)
                 })
+                var watcher = new Watcher(vm,RegExp.$1,function(newVal){
+                    node.textContent = text.replace(/\{\{(.*)\}\}/,newVal)  // 将更新数据同步到视图上的逻辑代码
+                })
+                console.log(watcher);
                 node.textContent = text.replace(/\{\{(.*)\}\}/,val)
             }
-            if(node.childNodes){
+            if(node.childNodes){ //  如果当前遍历的node中还有子节点，继续递归
                 replace(node)
             }
         })
@@ -131,28 +143,21 @@ function Compile(el,vm){
 
 
 
-
-
-
-
-
-
-
 /**发布--订阅模式 */
 function Dep(){
     this.subs = []
 }
     /**
      * 订阅 
-     * subs是一个事件池，包含诸如[fn1,fn2,fn3]
-     * 订阅就是往事件池subs里添加事件方法，每个事件方法都有update方法
+     * subs是一个事件池，包含诸如[watcher1,watcher2,watcher3]
+     * 订阅就是往事件池subs里添加watcher对象，每个对象都有update方法
      */
 Dep.prototype.addSub = function(sub){
     this.subs.push(sub)
 }
     /**
      * 发布 
-     * 发布就是循环subs事件池中的事件(每个事件都有一个update方法)执行update方法
+     * 发布就是循环subs事件池中的watcher对象(每个对象都有一个update方法)执行update方法
      */
 Dep.prototype.notify = function(){
     this.subs.forEach(function(sub){
@@ -165,24 +170,23 @@ Dep.prototype.notify = function(){
      * 在Watcher的原型上添加update方法，通过Watcher类创建的实例都有update方法
      * @param {*} fn 实例化Watcher传入的函数 返回一个对象{fn:fn}
      */
-function Watcher(fn){  
+function Watcher(vm,exp,fn){  
+    this.vm = vm;
+    this.exp = exp;
     this.fn = fn;
+    Dep.target = this; // 将new出来的实例对象watcher(this)赋值给Dep的target属性,这样方便将watcher对象添加到订阅中(即添加到subs数组中)
+    let val = vm;
+    let arr = exp.split('.');
+    arr.forEach(function(key){  // 取this.a.a，目的是取值会触发Observe的get方法
+        val = val[key]
+    })
+    Dep.target = null;
 }
 Watcher.prototype.update = function(){
-    this.fn()
+    let val = this.vm;
+    let arr = this.exp.split('.');
+    arr.forEach(function(key){
+        val = val[key]  // val拿到的就是最新的值
+    })
+    this.fn(val)  
 }
-
-    /**测试发布订阅和Watcher */
-var fn1 = function(){
-    console.log(100)
-}
-var watcher = new Watcher(fn1); // 创建一个实例watcher:{fn:fn1}
-watcher.update() // 执行实例watcher的update方法，也就是执行 fn1()
-console.log(watcher)
-var dep = new Dep(); // 创建一个发布订阅实例dep:{subs:[]}
-console.log(dep)
-dep.addSub(watcher) // 执行dep实例的addSub方法(也就是订阅)，并传入watcher实例 => 运行结果 dep:{subs:[watcher]}
-dep.addSub(watcher) // 执行dep实例的addSub方法(也就是订阅)，并传入watcher实例 => 运行结果 dep:{subs:[watcher,watcher]}
-dep.addSub(watcher) // 执行dep实例的addSub方法(也就是订阅)，并传入watcher实例 => 运行结果 dep:{subs:[watcher,watcher,watcher]}
-console.log(dep)
-dep.notify() // 执行实例的notify方法(也就是发布) => 运行结果 循环subs中的每一个watcher实例，并执行该实例的update方法，也就是执行 fn1() ,输出 1 , 1 , 1
